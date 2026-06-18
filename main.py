@@ -3,6 +3,7 @@ import os
 import numpy as np
 import glob
 
+
 INPUT_DIR = "input"
 OUTPUT_DATA_PATH = "chess_data.npz"
 

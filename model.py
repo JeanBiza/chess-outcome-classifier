@@ -6,7 +6,7 @@ class ChessOutcomeClassifier(nn.Module):
         super(ChessOutcomeClassifier, self).__init__()
         
         self.fc1 = nn.Linear(in_features=769, out_features=1024)
-        self.bn1 = nn.BatchNorm1d(num_features=1024) # NEW: Batch Normalization
+        self.bn1 = nn.BatchNorm1d(num_features=1024)
         self.relu1 = nn.ReLU()
         self.drop1 = nn.Dropout(p=0.3) 
         
