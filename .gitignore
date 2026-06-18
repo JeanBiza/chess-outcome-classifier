@@ -1,3 +1,6 @@
 /.env
 venv/
 *.pgn
+*.npz
+__pycache__/
+*.pyc
