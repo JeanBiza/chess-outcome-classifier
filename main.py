@@ -5,6 +5,7 @@ load_dotenv()
 import numpy as np
 
 PGN_FILE_PATH = os.getenv("PGN_FILE_PATH")
+OUTPUT_DATA_PATH = "chess_data.npz"
 MAX_GAMES_TO_PROCESS = 5
 
 LABEL_MAP = {
@@ -38,39 +39,53 @@ def board_to_tensor(board):
         
     return tensor.flatten()
 
-def extract_games():
+def build_dataset():
+    X = []
+    y = []
+
     games_processed = 0
-    with open(PGN_FILE_PATH, "r", encoding="utf-8") as pgn:
+
+    print(f"Starting data extraction from: {PGN_FILE_PATH}")
+
+    with open(PGN_FILE_PATH, "r", encoding="utf-8") as pgn_file:
         while True:
-            game = chess.pgn.read_game(pgn)
+            game = chess.pgn.read_game(pgn_file)
 
             if game is None:
                 break
 
-            if games_processed >= MAX_GAMES_TO_PROCESS:
-                break
-
             game_result = game.headers.get("Result", "*")
 
-            if game_result not in ["1-0", "0-1", "1/2-1/2"]:
+            if game_result not in LABEL_MAP:
                 continue
 
-            print(f"\n--- Processing Game {games_processed+1} ---")
-
             board = game.board()
-
             for move in game.mainline_moves():
                 board.push(move)
             
             board_tensor = board_to_tensor(board)
-            
-            print(f"Target Label: {game_result}")
-            print(f"Tensor Shape: {board_tensor.shape}")
-            print(f"First 10 tensor values: {board_tensor[:10]}")   
+            numeric_label = LABEL_MAP[game_result]
+
+            X.append(board_tensor)
+            y.append(numeric_label)
 
             games_processed += 1
-    
-    print(f"\nFinished processing {games_processed} games successfully.")
+
+            if games_processed % 1000 == 0:
+                print(f"Processed {games_processed} games...")
+            
+    print("\nExtraction complete, Converting to numpy arrays...")
+
+    X_np = np.array(X, dtype=np.float32)
+    y_np = np.array(y, dtype=np.int64)
+
+    print(f"Features shape (X): {X_np.shape}")
+    print(f"Labels shape (y): {y_np.shape}")
+
+    np.savez_compressed(OUTPUT_DATA_PATH, features=X_np, labels=y_np)
+    print(f"Dataset successfully saved to {OUTPUT_DATA_PATH}")
+
+
 
 if __name__ == "__main__":
-    extract_games()
+    build_dataset()
