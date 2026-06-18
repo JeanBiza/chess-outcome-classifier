@@ -1,12 +1,10 @@
 import chess.pgn
 import os
-from dotenv import load_dotenv
-load_dotenv()
 import numpy as np
+import glob
 
-PGN_FILE_PATH = os.getenv("PGN_FILE_PATH")
+INPUT_DIR = "input"
 OUTPUT_DATA_PATH = "chess_data.npz"
-MAX_GAMES_TO_PROCESS = 5
 
 LABEL_MAP = {
     "1-0": 0,       # White Wins
@@ -37,44 +35,65 @@ def board_to_tensor(board):
 
             tensor[plane][rank][file] = 1.0
         
-    return tensor.flatten()
+    flattened_board = tensor.flatten()
+    turn_indicator = np.array([1.0 if board.turn == chess.WHITE else 0.0], dtype=np.float32)
+    final_tensor = np.concatenate((flattened_board, turn_indicator))
+    return final_tensor
 
 def build_dataset():
     X = []
     y = []
 
-    games_processed = 0
+    if not os.path.exists(INPUT_DIR):
+        print(f"Creating file directory...")
+        os.mkdir(INPUT_DIR)
+        print(f"Please add pgn files in '{INPUT_DIR}'")
+        return
+    
+    pgn_files = glob.glob(os.path.join(INPUT_DIR, "*.pgn"))
 
-    print(f"Starting data extraction from: {PGN_FILE_PATH}")
+    if not pgn_files:
+        print(f"No .pgn files found in the '{INPUT_DIR}' directory.")
 
-    with open(PGN_FILE_PATH, "r", encoding="utf-8") as pgn_file:
-        while True:
-            game = chess.pgn.read_game(pgn_file)
+    print(f"Found {len(pgn_files)} PGN file(s). Starting extraction...\n")
 
-            if game is None:
-                break
+    total_games_processed = 0
 
-            game_result = game.headers.get("Result", "*")
+    for file_path in pgn_files:
+        print(f"--- Processing File: {os.path.basename(file_path)} ---")
+        file_games_processed = 0
 
-            if game_result not in LABEL_MAP:
-                continue
+        with open(file_path, "r", encoding="utf-8") as pgn_file:
+            while True:
+                game = chess.pgn.read_game(pgn_file)
 
-            board = game.board()
-            for move in game.mainline_moves():
-                board.push(move)
+                if game is None:
+                    break
+
+                game_result = game.headers.get("Result", "*")
+
+                if game_result not in LABEL_MAP:
+                    continue
+
+                board = game.board()
+                for move in game.mainline_moves():
+                    board.push(move)
+                
+                board_tensor = board_to_tensor(board)
+                numeric_label = LABEL_MAP[game_result]
+
+                X.append(board_tensor)
+                y.append(numeric_label)
+
+                file_games_processed += 1
+                total_games_processed += 1
+
+                if file_games_processed % 5000 == 0:
+                    print(f"Extracted {file_games_processed} games from current file...")
+
+        print(f"Finished {os.path.basename(file_path)}. Total valid games: {file_games_processed}\n")
             
-            board_tensor = board_to_tensor(board)
-            numeric_label = LABEL_MAP[game_result]
-
-            X.append(board_tensor)
-            y.append(numeric_label)
-
-            games_processed += 1
-
-            if games_processed % 1000 == 0:
-                print(f"Processed {games_processed} games...")
-            
-    print("\nExtraction complete, Converting to numpy arrays...")
+    print(f"Extraction complete! Total games across all files: {total_games_processed}")
 
     X_np = np.array(X, dtype=np.float32)
     y_np = np.array(y, dtype=np.int64)
