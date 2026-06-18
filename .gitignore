@@ -4,3 +4,4 @@ venv/
 *.npz
 __pycache__/
 *.pyc
+*.pt
