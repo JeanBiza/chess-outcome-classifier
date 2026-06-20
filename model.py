@@ -1,42 +1,42 @@
 import torch
 import torch.nn as nn
 
-class ChessOutcomeClassifier(nn.Module):
+class ChessOutcomeCNN(nn.Module):
     def __init__(self):
-        super(ChessOutcomeClassifier, self).__init__()
-        
-        self.fc1 = nn.Linear(in_features=769, out_features=1024)
-        self.bn1 = nn.BatchNorm1d(num_features=1024)
-        self.relu1 = nn.ReLU()
-        self.drop1 = nn.Dropout(p=0.3) 
-        
-        self.fc2 = nn.Linear(in_features=1024, out_features=512)
-        self.bn2 = nn.BatchNorm1d(num_features=512)
-        self.relu2 = nn.ReLU()
-        self.drop2 = nn.Dropout(p=0.3)
-        
-        self.fc3 = nn.Linear(in_features=512, out_features=256)
-        self.bn3 = nn.BatchNorm1d(num_features=256)
-        self.relu3 = nn.ReLU()
-        self.drop3 = nn.Dropout(p=0.3)
-        
-        self.fc4 = nn.Linear(in_features=256, out_features=3)
+        super().__init__()
 
-    def forward(self, x):
-        x = self.fc1(x)
-        x = self.bn1(x)
-        x = self.relu1(x)
-        x = self.drop1(x) 
-        
-        x = self.fc2(x)
-        x = self.bn2(x)
-        x = self.relu2(x)
-        x = self.drop2(x) 
-        
-        x = self.fc3(x)
-        x = self.bn3(x)
-        x = self.relu3(x)
-        x = self.drop3(x)
-        
-        x = self.fc4(x)
-        return x
+        self.conv_block = nn.Sequential(
+            nn.Conv2d(12, 32, kernel_size=3, padding=1),
+            nn.BatchNorm2d(32),
+            nn.ReLU(),
+            nn.Dropout2d(p=0.2),
+
+            nn.Conv2d(32, 64, kernel_size=3, padding=1), 
+            nn.BatchNorm2d(64),
+            nn.ReLU(),
+            nn.Dropout2d(p=0.2),
+
+            nn.Conv2d(64, 128, kernel_size=3, padding=1),
+            nn.BatchNorm2d(128),
+            nn.ReLU(),
+        )
+
+        self.fc_block = nn.Sequential(
+            nn.Linear(8192 + 7, 512),
+            nn.BatchNorm1d(512),
+            nn.ReLU(),
+            nn.Dropout(p=0.5),
+
+            nn.Linear(512, 128),
+            nn.BatchNorm1d(128),
+            nn.ReLU(),
+            nn.Dropout(p=0.4),
+
+            nn.Linear(128, 3)
+        )
+
+    def forward(self, board_planes, extra_features):
+        x = self.conv_block(board_planes)
+        x = x.view(x.size(0), -1)
+        x = torch.cat([x, extra_features], dim=1)
+        return self.fc_block(x)
