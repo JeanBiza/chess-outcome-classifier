@@ -5,6 +5,8 @@ import torch
 import torch.nn.functional as F
 import numpy as np
 import chess
+from tensor import board_to_tensor
+from engine import best_move      
 
 from model import ChessOutcomeCNN
 
@@ -31,28 +33,6 @@ model.eval()
 class ChessPosition(BaseModel):
     fen: str
 
-def board_to_tensor(board):
-    planes = np.zeros((12, 8, 8), dtype=np.float32)
-
-    for square in chess.SQUARES:
-        piece = board.piece_at(square)
-        if piece:
-            color_offset = 0 if piece.color == chess.WHITE else 6
-            plane = PIECE_MAP[piece.piece_type] + color_offset
-            planes[plane][chess.square_rank(square)][chess.square_file(square)] = 1.0
-
-    extra = np.array([
-        1.0 if board.turn == chess.WHITE else 0.0,
-        1.0 if board.has_kingside_castling_rights(chess.WHITE) else 0.0,
-        1.0 if board.has_queenside_castling_rights(chess.WHITE) else 0.0,
-        1.0 if board.has_kingside_castling_rights(chess.BLACK) else 0.0,
-        1.0 if board.has_queenside_castling_rights(chess.BLACK) else 0.0,
-        board.ep_square / 63.0 if board.ep_square is not None else 0.0,
-        board.halfmove_clock / 100.0,
-    ], dtype=np.float32)
-
-    return planes, extra
-
 @app.post("/predict")
 def predict_outcome(position: ChessPosition):
     try:
@@ -73,5 +53,16 @@ def predict_outcome(position: ChessPosition):
             "draw_probability":      float(probs[2] * 100)
         }
 
+    except ValueError:
+        return {"error": "Invalid FEN string provided."}
+    
+@app.post("/best_move")
+def get_best_move(position: ChessPosition):
+    try:
+        board = chess.Board(position.fen)
+        move = best_move(model, board, depth=3, device=device)
+        if move is None:
+            return {"error": "No legal moves available"}
+        return {"best_move": move.uci()}  # ej: "e2e4"
     except ValueError:
         return {"error": "Invalid FEN string provided."}
