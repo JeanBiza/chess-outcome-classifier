@@ -1,14 +1,10 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
-import torch
-import torch.nn.functional as F
-import numpy as np
 import chess
-from tensor import board_to_tensor
-from engine import best_move      
 
-from model import ChessOutcomeCNN
+from tensor import board_to_tensor
+from engine import load_session, best_move, evaluate
 
 app = FastAPI(title="Chess AI Predictor")
 
@@ -20,49 +16,43 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-PIECE_MAP = {
-    chess.PAWN: 0, chess.KNIGHT: 1, chess.BISHOP: 2,
-    chess.ROOK: 3, chess.QUEEN: 4, chess.KING: 5
-}
+sess = load_session("chess_model.onnx")
 
-device = torch.device("cpu")
-model = ChessOutcomeCNN()
-model.load_state_dict(torch.load("best_chess_model.pt", map_location=device))
-model.eval()
 
 class ChessPosition(BaseModel):
     fen: str
+
+
+class MoveRequest(BaseModel):
+    fen: str
+    depth: int = 2
+
 
 @app.post("/predict")
 def predict_outcome(position: ChessPosition):
     try:
         board = chess.Board(position.fen)
-
-        planes, extra = board_to_tensor(board)
-
-        board_tensor = torch.tensor(planes, dtype=torch.float32).unsqueeze(0).to(device)
-        extra_tensor = torch.tensor(extra,  dtype=torch.float32).unsqueeze(0).to(device)
-
-        with torch.no_grad():
-            logits = model(board_tensor, extra_tensor)
-            probs  = F.softmax(logits, dim=1).squeeze().numpy()
-
+        score = evaluate(sess, board)
+        white = (score + 1) / 2 * 100
+        black = 100 - white
         return {
-            "white_win_probability": float(probs[0] * 100),
-            "black_win_probability": float(probs[1] * 100),
-            "draw_probability":      float(probs[2] * 100)
+            "white_win_probability": round(white, 2),
+            "black_win_probability": round(black, 2),
+            "draw_probability": 0.0,
         }
-
     except ValueError:
         return {"error": "Invalid FEN string provided."}
-    
+
+
 @app.post("/best_move")
-def get_best_move(position: ChessPosition):
+def get_best_move(request: MoveRequest):
     try:
-        board = chess.Board(position.fen)
-        move = best_move(model, board, depth=3, device=device)
-        if move is None:
-            return {"error": "No legal moves available"}
-        return {"best_move": move.uci()}  # ej: "e2e4"
+        board = chess.Board(request.fen)
+        if request.depth not in (1, 2, 3):
+            return {"error": "depth must be 1, 2 or 3"}
+        mv = best_move(sess, board, depth=request.depth)
+        if mv is None:
+            return {"error": "No legal moves"}
+        return {"best_move": mv.uci()}
     except ValueError:
         return {"error": "Invalid FEN string provided."}

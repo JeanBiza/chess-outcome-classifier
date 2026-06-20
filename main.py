@@ -15,14 +15,13 @@ INPUT_DIR = "input"
 OUTPUT_DATA_PATH = "chess_data.npz"
 
 STOCKFISH_PATH = os.getenv("STOCKFISH_PATH")
-EVAL_DEPTH = 8
+EVAL_DEPTH = 12
 
 LABEL_MAP = {
     "1-0": 0,       # White wins
     "0-1": 1,       # Black wins
     "1/2-1/2": 2    # Draw
 }
-
 
 def get_stockfish_label(board, engine):
     info = engine.analyse(board, chess.engine.Limit(depth=EVAL_DEPTH))
@@ -32,11 +31,11 @@ def get_stockfish_label(board, engine):
         return None
 
     if score > 150:
-        return 0    # blancas ventaja
+        return 0
     elif score < -150:
-        return 1    # negras ventaja
+        return 1
     else:
-        return 2    # equilibrio / tablas
+        return 2
 
 
 def build_dataset():
@@ -70,12 +69,11 @@ def build_dataset():
                     if game is None:
                         break
 
-                    # Filtrar variantes no estándar
                     variant = game.headers.get("Variant", "Standard")
                     if variant.lower() not in ("standard", "from position", ""):
                         continue
 
-                    # Filtrar posiciones iniciales personalizadas
+
                     fen = game.headers.get("FEN", chess.STARTING_FEN)
                     if fen != chess.STARTING_FEN and game.headers.get("SetUp", "0") == "1":
                         continue
@@ -88,7 +86,6 @@ def build_dataset():
                     if len(moves) < 15:
                         continue
 
-                    # Muestrear una posición del medio/final de la partida
                     sample_at = random.randint(10, len(moves) - 1)
 
                     board = game.board()

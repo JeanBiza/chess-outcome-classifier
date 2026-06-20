@@ -6,7 +6,7 @@ class ChessOutcomeCNN(nn.Module):
         super().__init__()
 
         self.conv_block = nn.Sequential(
-            nn.Conv2d(12, 32, kernel_size=3, padding=1),
+            nn.Conv2d(14, 32, kernel_size=3, padding=1),
             nn.BatchNorm2d(32),
             nn.ReLU(),
             nn.Dropout2d(p=0.2),
