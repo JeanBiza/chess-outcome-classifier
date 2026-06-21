@@ -28,9 +28,12 @@ function App() {
     }
   };
 
+  const [arrow, setArrow] = useState([]);
+
   const fetchBestMove = async (fen) => {
     setLoadingMove(true);
     setBestMove(null);
+    setArrow([]);
     try {
       const res = await fetch(`${API}/best_move`, {
         method: 'POST',
@@ -38,7 +41,12 @@ function App() {
         body: JSON.stringify({ fen, depth: 2 }),
       });
       const data = await res.json();
-      setBestMove(data.best_move ?? null);
+      if (data.best_move) {
+        setBestMove(data.best_move);
+        const from = data.best_move.slice(0, 2);
+        const to   = data.best_move.slice(2, 4);
+        setArrow([{ startSquare: from, endSquare: to, color: 'red' }]);
+      }
     } catch (err) {
       console.error('best_move error:', err);
     } finally {
@@ -56,6 +64,7 @@ function App() {
     const move = gameCopy.move({ from: sourceSquare, to: targetSquare, promotion: 'q' });
     if (move === null) return false;
     setGame(gameCopy);
+    setArrow([]);
     setBestMove(null);
     fetchPrediction(gameCopy.fen());
     return true;
@@ -64,6 +73,7 @@ function App() {
   const reset = () => {
     const newGame = new Chess();
     setGame(newGame);
+    setArrow([]);
     setBestMove(null);
     fetchPrediction(newGame.fen());
   };
@@ -82,6 +92,7 @@ function App() {
             allowDragging: true,
             dragActivationDistance: 0,
             canDragPiece: () => true,
+            arrows: arrow,
           }} />
         </div>
 

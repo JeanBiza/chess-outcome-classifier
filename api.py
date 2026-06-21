@@ -25,7 +25,7 @@ class ChessPosition(BaseModel):
 
 class MoveRequest(BaseModel):
     fen: str
-    depth: int = 2
+    depth: int = 3
 
 
 @app.post("/predict")
