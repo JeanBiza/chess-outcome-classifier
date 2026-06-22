@@ -4,17 +4,13 @@ import chess.engine
 import numpy as np
 import glob
 import random
-from dotenv import load_dotenv
 import os
-
+from setup_stockfish import STOCKFISH_PATH
 from tensor import board_to_tensor
 
-load_dotenv()
 
 INPUT_DIR = "input"
 OUTPUT_DATA_PATH = "chess_data.npz"
-
-STOCKFISH_PATH = os.getenv("STOCKFISH_PATH")
 EVAL_DEPTH = 12
 
 LABEL_MAP = {
