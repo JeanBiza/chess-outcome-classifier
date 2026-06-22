@@ -13,6 +13,7 @@ function App() {
   const [orientation, setOrientation] = useState('white');
   const [history, setHistory]       = useState([]);
   const [gameOver, setGameOver]     = useState(null);
+  const [copyFeedback, setCopyFeedback] = useState(null);
   const historyRef = useRef(null);
 
   const fetchPrediction = async (fen) => {
@@ -71,14 +72,11 @@ function App() {
 
   function checkGameOver(g) {
     if (!g.isGameOver()) return null;
-    if (g.isCheckmate()) {
-      const winner = g.turn() === 'w' ? 'Black' : 'White';
-      return `${winner} wins by checkmate`;
-    }
-    if (g.isStalemate())          return 'Draw by stalemate';
+    if (g.isCheckmate()) return `${g.turn() === 'w' ? 'Black' : 'White'} wins by checkmate`;
+    if (g.isStalemate()) return 'Draw by stalemate';
     if (g.isThreefoldRepetition()) return 'Draw by repetition';
     if (g.isInsufficientMaterial()) return 'Draw by insufficient material';
-    if (g.isDraw())               return 'Draw by 50-move rule';
+    if (g.isDraw()) return 'Draw by 50-move rule';
     return 'Game over';
   }
 
@@ -89,20 +87,30 @@ function App() {
     const move = gameCopy.move({ from: sourceSquare, to: targetSquare, promotion: 'q' });
     if (move === null) return false;
 
-    const newHistory = [...history, move.san];
     setGame(gameCopy);
-    setHistory(newHistory);
+    setHistory(h => [...h, move.san]);
     setArrow([]);
     setBestMove(null);
 
     const over = checkGameOver(gameCopy);
-    if (over) {
-      setGameOver(over);
-    } else {
-      fetchPrediction(gameCopy.fen());
-    }
+    if (over) setGameOver(over);
+    else fetchPrediction(gameCopy.fen());
     return true;
   }
+
+  const undoMove = () => {
+    if (history.length === 0 || gameOver) return;
+    
+    const gameCopy = new Chess();
+    const movesToReplay = history.slice(0, -1);
+    movesToReplay.forEach(san => gameCopy.move(san));
+    
+    setGame(gameCopy);
+    setHistory(h => h.slice(0, -1));
+    setArrow([]);
+    setBestMove(null);
+    fetchPrediction(gameCopy.fen());
+  };
 
   const reset = () => {
     const newGame = new Chess();
@@ -111,14 +119,24 @@ function App() {
     setArrow([]);
     setBestMove(null);
     setGameOver(null);
+    setCopyFeedback(null);
     fetchPrediction(newGame.fen());
   };
 
   const flipBoard = () => setOrientation(o => o === 'white' ? 'black' : 'white');
 
+  const copyToClipboard = async (text, key) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopyFeedback(key);
+      setTimeout(() => setCopyFeedback(null), 2000);
+    } catch (err) {
+      console.error('Copy failed:', err);
+    }
+  };
+
   const turn = game.turn() === 'w' ? 'White' : 'Black';
 
-  // Group moves into pairs for display: [[w1, b1], [w2, b2], ...]
   const movePairs = [];
   for (let i = 0; i < history.length; i += 2) {
     movePairs.push([history[i], history[i + 1]]);
@@ -145,7 +163,25 @@ function App() {
 
           {gameOver && (
             <div style={styles.gameOverCard}>
-              <span style={styles.gameOverIcon}>♟</span>
+              <div style={styles.gameOverHeader}>
+                <span style={styles.gameOverIcon}>♟</span>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <button
+                    style={styles.copyBtn}
+                    onClick={() => copyToClipboard(game.pgn(), 'pgn')}
+                    title="Copy PGN"
+                  >
+                    {copyFeedback === 'pgn' ? '✓' : 'PGN'}
+                  </button>
+                  <button
+                    style={styles.copyBtn}
+                    onClick={() => copyToClipboard(game.fen(), 'fen')}
+                    title="Copy FEN"
+                  >
+                    {copyFeedback === 'fen' ? '✓' : 'FEN'}
+                  </button>
+                </div>
+              </div>
               <p style={styles.gameOverText}>{gameOver}</p>
             </div>
           )}
@@ -195,6 +231,13 @@ function App() {
           <div style={styles.buttonRow}>
             <button style={styles.resetBtn} onClick={reset}>Reset</button>
             <button style={styles.resetBtn} onClick={flipBoard}>Flip</button>
+            <button
+              style={{ ...styles.resetBtn, opacity: history.length === 0 || !!gameOver ? 0.3 : 1 }}
+              onClick={undoMove}
+              disabled={history.length === 0 || !!gameOver}
+            >
+              Undo
+            </button>
           </div>
 
         </div>
@@ -251,15 +294,31 @@ const styles = {
     background: '#2a1f0e',
     border: '1px solid #ff8c00',
     borderRadius: 8,
-    padding: '14px 18px',
-    textAlign: 'center',
+    padding: '12px 14px',
+  },
+  gameOverHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 6,
   },
   gameOverIcon: { fontSize: 24 },
+  copyBtn: {
+    background: '#3a2810',
+    border: '1px solid #ff8c00',
+    color: '#ff8c00',
+    fontSize: 11,
+    fontWeight: 700,
+    cursor: 'pointer',
+    padding: '2px 7px',
+    borderRadius: 4,
+    letterSpacing: '0.05em',
+  },
   gameOverText: {
-    margin: '6px 0 0',
+    margin: 0,
     fontWeight: 700,
     color: '#ff8c00',
-    fontSize: 14,
+    fontSize: 13,
   },
   card: {
     background: '#242424',
@@ -337,14 +396,8 @@ const styles = {
     fontSize: 13,
     fontFamily: 'monospace',
   },
-  moveNum: {
-    color: '#555',
-    minWidth: 22,
-  },
-  moveSan: {
-    color: '#e0e0e0',
-    minWidth: 48,
-  },
+  moveNum: { color: '#555', minWidth: 22 },
+  moveSan: { color: '#e0e0e0', minWidth: 48 },
   buttonRow: {
     display: 'flex',
     gap: 8,
