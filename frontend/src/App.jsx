@@ -5,15 +5,17 @@ import { Chessboard } from 'react-chessboard';
 const API = 'http://localhost:8000';
 
 function App() {
-  const [game, setGame]             = useState(new Chess());
-  const [prediction, setPrediction] = useState({ white: 50, black: 50, draw: 0 });
-  const [bestMove, setBestMove]     = useState(null);
+  const [game, setGame]               = useState(new Chess());
+  const [prediction, setPrediction]   = useState({ white: 50, black: 50, draw: 0 });
+  const [bestMove, setBestMove]       = useState(null);
   const [loadingMove, setLoadingMove] = useState(false);
-  const [arrow, setArrow]           = useState([]);
+  const [arrow, setArrow]             = useState([]);
   const [orientation, setOrientation] = useState('white');
-  const [history, setHistory]       = useState([]);
-  const [gameOver, setGameOver]     = useState(null);
+  const [history, setHistory]         = useState([]);
+  const [gameOver, setGameOver]       = useState(null);
   const [copyFeedback, setCopyFeedback] = useState(null);
+  const [vsAI, setVsAI]               = useState(false);
+  const [aiColor, setAiColor]         = useState('b');
   const historyRef = useRef(null);
 
   const fetchPrediction = async (fen) => {
@@ -60,6 +62,39 @@ function App() {
     }
   };
 
+  const makeAIMove = async (currentGame) => {
+    setLoadingMove(true);
+    try {
+      const res = await fetch(`${API}/best_move`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fen: currentGame.fen(), depth: 2 }),
+      });
+      const data = await res.json();
+      if (!data.best_move) return;
+
+      const gameCopy = new Chess();
+      gameCopy.load(currentGame.fen());
+      const move = gameCopy.move({
+        from: data.best_move.slice(0, 2),
+        to:   data.best_move.slice(2, 4),
+        promotion: 'q',
+      });
+      if (!move) return;
+
+      setGame(gameCopy);
+      setHistory(h => [...h, move.san]);
+      fetchPrediction(gameCopy.fen());
+
+      const over = checkGameOver(gameCopy);
+      if (over) setGameOver(over);
+    } catch (err) {
+      console.error('AI move error:', err);
+    } finally {
+      setLoadingMove(false);
+    }
+  };
+
   useEffect(() => {
     fetchPrediction(game.fen());
   }, []);
@@ -81,7 +116,9 @@ function App() {
   }
 
   function onDrop({ sourceSquare, targetSquare }) {
-    if (gameOver) return false;
+    if (gameOver || loadingMove) return false;
+    if (vsAI && game.turn() === aiColor) return false;
+
     const gameCopy = new Chess();
     gameCopy.load(game.fen());
     const move = gameCopy.move({ from: sourceSquare, to: targetSquare, promotion: 'q' });
@@ -93,20 +130,24 @@ function App() {
     setBestMove(null);
 
     const over = checkGameOver(gameCopy);
-    if (over) setGameOver(over);
-    else fetchPrediction(gameCopy.fen());
+    if (over) { setGameOver(over); return true; }
+
+    fetchPrediction(gameCopy.fen());
+
+    if (vsAI && gameCopy.turn() === aiColor) {
+      makeAIMove(gameCopy);
+    }
+
     return true;
   }
 
   const undoMove = () => {
     if (history.length === 0 || gameOver) return;
-    
-    const gameCopy = new Chess();
     const movesToReplay = history.slice(0, -1);
+    const gameCopy = new Chess();
     movesToReplay.forEach(san => gameCopy.move(san));
-    
     setGame(gameCopy);
-    setHistory(h => h.slice(0, -1));
+    setHistory(movesToReplay);
     setArrow([]);
     setBestMove(null);
     fetchPrediction(gameCopy.fen());
@@ -121,6 +162,10 @@ function App() {
     setGameOver(null);
     setCopyFeedback(null);
     fetchPrediction(newGame.fen());
+
+    if (vsAI && aiColor === 'w') {
+      makeAIMove(newGame);
+    }
   };
 
   const flipBoard = () => setOrientation(o => o === 'white' ? 'black' : 'white');
@@ -135,6 +180,27 @@ function App() {
     }
   };
 
+  const startVsAI = (color) => {
+    setVsAI(true);
+    setAiColor(color);
+    setOrientation(color === 'w' ? 'black' : 'white');
+    const newGame = new Chess();
+    setGame(newGame);
+    setHistory([]);
+    setArrow([]);
+    setBestMove(null);
+    setGameOver(null);
+    setCopyFeedback(null);
+    fetchPrediction(newGame.fen());
+    if (color === 'w') makeAIMove(newGame);
+  };
+
+  const stopVsAI = () => {
+    setVsAI(false);
+    reset();
+    setOrientation('white');
+  };
+
   const turn = game.turn() === 'w' ? 'White' : 'Black';
 
   const movePairs = [];
@@ -146,14 +212,35 @@ function App() {
     <div style={styles.root}>
       <h2 style={styles.title}>AI Chess Evaluator</h2>
 
+      <div style={styles.modeRow}>
+        <button
+          style={{ ...styles.modeBtn, ...((!vsAI) ? styles.modeBtnActive : {}) }}
+          onClick={stopVsAI}
+        >
+          Free Play
+        </button>
+        <button
+          style={{ ...styles.modeBtn, ...(vsAI && aiColor === 'b' ? styles.modeBtnActive : {}) }}
+          onClick={() => startVsAI('b')}
+        >
+          Play as White
+        </button>
+        <button
+          style={{ ...styles.modeBtn, ...(vsAI && aiColor === 'w' ? styles.modeBtnActive : {}) }}
+          onClick={() => startVsAI('w')}
+        >
+          Play as Black
+        </button>
+      </div>
+
       <div style={styles.layout}>
         <div style={styles.boardWrap}>
           <Chessboard options={{
             position: game.fen(),
             onPieceDrop: onDrop,
-            allowDragging: !gameOver,
+            allowDragging: !gameOver && !loadingMove,
             dragActivationDistance: 0,
-            canDragPiece: () => !gameOver,
+            canDragPiece: () => !gameOver && !loadingMove,
             arrows: arrow,
             boardOrientation: orientation,
           }} />
@@ -166,18 +253,10 @@ function App() {
               <div style={styles.gameOverHeader}>
                 <span style={styles.gameOverIcon}>♟</span>
                 <div style={{ display: 'flex', gap: 6 }}>
-                  <button
-                    style={styles.copyBtn}
-                    onClick={() => copyToClipboard(game.pgn(), 'pgn')}
-                    title="Copy PGN"
-                  >
+                  <button style={styles.copyBtn} onClick={() => copyToClipboard(game.pgn(), 'pgn')}>
                     {copyFeedback === 'pgn' ? '✓' : 'PGN'}
                   </button>
-                  <button
-                    style={styles.copyBtn}
-                    onClick={() => copyToClipboard(game.fen(), 'fen')}
-                    title="Copy FEN"
-                  >
+                  <button style={styles.copyBtn} onClick={() => copyToClipboard(game.fen(), 'fen')}>
                     {copyFeedback === 'fen' ? '✓' : 'FEN'}
                   </button>
                 </div>
@@ -193,24 +272,32 @@ function App() {
             <EvalRow label="Draw"       value={prediction.draw}  color="#555" />
           </div>
 
-          <div style={styles.card}>
-            <p style={styles.cardTitle}>Best Move <span style={styles.dim}>({turn} to play)</span></p>
-            <div style={styles.moveBox}>
-              {loadingMove
-                ? <span style={styles.dim}>Calculating...</span>
-                : bestMove
-                  ? <span style={styles.moveText}>{bestMove}</span>
-                  : <span style={styles.dim}>—</span>
-              }
+          {!vsAI && (
+            <div style={styles.card}>
+              <p style={styles.cardTitle}>Best Move <span style={styles.dim}>({turn} to play)</span></p>
+              <div style={styles.moveBox}>
+                {loadingMove
+                  ? <span style={styles.dim}>Calculating...</span>
+                  : bestMove
+                    ? <span style={styles.moveText}>{bestMove}</span>
+                    : <span style={styles.dim}>—</span>
+                }
+              </div>
+              <button
+                style={styles.btn}
+                onClick={() => fetchBestMove(game.fen())}
+                disabled={loadingMove || !!gameOver}
+              >
+                {loadingMove ? 'Thinking...' : 'Find Best Move'}
+              </button>
             </div>
-            <button
-              style={styles.btn}
-              onClick={() => fetchBestMove(game.fen())}
-              disabled={loadingMove || !!gameOver}
-            >
-              {loadingMove ? 'Thinking...' : 'Find Best Move'}
-            </button>
-          </div>
+          )}
+
+          {vsAI && loadingMove && (
+            <div style={{ ...styles.card, textAlign: 'center' }}>
+              <p style={styles.cardTitle}>AI is thinking...</p>
+            </div>
+          )}
 
           <div style={styles.card}>
             <p style={styles.cardTitle}>Move History</p>
@@ -273,8 +360,28 @@ const styles = {
     fontSize: 22,
     fontWeight: 600,
     letterSpacing: '0.05em',
-    marginBottom: 24,
+    marginBottom: 16,
     color: '#fff',
+  },
+  modeRow: {
+    display: 'flex',
+    gap: 8,
+    marginBottom: 20,
+  },
+  modeBtn: {
+    padding: '7px 16px',
+    background: 'transparent',
+    color: '#555',
+    border: '1px solid #333',
+    borderRadius: 6,
+    fontSize: 13,
+    cursor: 'pointer',
+  },
+  modeBtnActive: {
+    background: '#ff8c00',
+    color: '#000',
+    border: '1px solid #ff8c00',
+    fontWeight: 700,
   },
   layout: {
     display: 'flex',
@@ -398,10 +505,7 @@ const styles = {
   },
   moveNum: { color: '#555', minWidth: 22 },
   moveSan: { color: '#e0e0e0', minWidth: 48 },
-  buttonRow: {
-    display: 'flex',
-    gap: 8,
-  },
+  buttonRow: { display: 'flex', gap: 8 },
   resetBtn: {
     flex: 1,
     padding: '8px 0',
