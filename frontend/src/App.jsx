@@ -1,14 +1,19 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Chess } from 'chess.js';
 import { Chessboard } from 'react-chessboard';
 
 const API = 'http://localhost:8000';
 
 function App() {
-  const [game, setGame] = useState(new Chess());
+  const [game, setGame]             = useState(new Chess());
   const [prediction, setPrediction] = useState({ white: 50, black: 50, draw: 0 });
-  const [bestMove, setBestMove] = useState(null);
+  const [bestMove, setBestMove]     = useState(null);
   const [loadingMove, setLoadingMove] = useState(false);
+  const [arrow, setArrow]           = useState([]);
+  const [orientation, setOrientation] = useState('white');
+  const [history, setHistory]       = useState([]);
+  const [gameOver, setGameOver]     = useState(null);
+  const historyRef = useRef(null);
 
   const fetchPrediction = async (fen) => {
     try {
@@ -28,8 +33,6 @@ function App() {
     }
   };
 
-  const [arrow, setArrow] = useState([]);
-
   const fetchBestMove = async (fen) => {
     setLoadingMove(true);
     setBestMove(null);
@@ -43,9 +46,11 @@ function App() {
       const data = await res.json();
       if (data.best_move) {
         setBestMove(data.best_move);
-        const from = data.best_move.slice(0, 2);
-        const to   = data.best_move.slice(2, 4);
-        setArrow([{ startSquare: from, endSquare: to, color: 'red' }]);
+        setArrow([{
+          startSquare: data.best_move.slice(0, 2),
+          endSquare:   data.best_move.slice(2, 4),
+          color: 'orange',
+        }]);
       }
     } catch (err) {
       console.error('best_move error:', err);
@@ -58,27 +63,66 @@ function App() {
     fetchPrediction(game.fen());
   }, []);
 
+  useEffect(() => {
+    if (historyRef.current) {
+      historyRef.current.scrollTop = historyRef.current.scrollHeight;
+    }
+  }, [history]);
+
+  function checkGameOver(g) {
+    if (!g.isGameOver()) return null;
+    if (g.isCheckmate()) {
+      const winner = g.turn() === 'w' ? 'Black' : 'White';
+      return `${winner} wins by checkmate`;
+    }
+    if (g.isStalemate())          return 'Draw by stalemate';
+    if (g.isThreefoldRepetition()) return 'Draw by repetition';
+    if (g.isInsufficientMaterial()) return 'Draw by insufficient material';
+    if (g.isDraw())               return 'Draw by 50-move rule';
+    return 'Game over';
+  }
+
   function onDrop({ sourceSquare, targetSquare }) {
+    if (gameOver) return false;
     const gameCopy = new Chess();
     gameCopy.load(game.fen());
     const move = gameCopy.move({ from: sourceSquare, to: targetSquare, promotion: 'q' });
     if (move === null) return false;
+
+    const newHistory = [...history, move.san];
     setGame(gameCopy);
+    setHistory(newHistory);
     setArrow([]);
     setBestMove(null);
-    fetchPrediction(gameCopy.fen());
+
+    const over = checkGameOver(gameCopy);
+    if (over) {
+      setGameOver(over);
+    } else {
+      fetchPrediction(gameCopy.fen());
+    }
     return true;
   }
 
   const reset = () => {
     const newGame = new Chess();
     setGame(newGame);
+    setHistory([]);
     setArrow([]);
     setBestMove(null);
+    setGameOver(null);
     fetchPrediction(newGame.fen());
   };
 
+  const flipBoard = () => setOrientation(o => o === 'white' ? 'black' : 'white');
+
   const turn = game.turn() === 'w' ? 'White' : 'Black';
+
+  // Group moves into pairs for display: [[w1, b1], [w2, b2], ...]
+  const movePairs = [];
+  for (let i = 0; i < history.length; i += 2) {
+    movePairs.push([history[i], history[i + 1]]);
+  }
 
   return (
     <div style={styles.root}>
@@ -89,19 +133,28 @@ function App() {
           <Chessboard options={{
             position: game.fen(),
             onPieceDrop: onDrop,
-            allowDragging: true,
+            allowDragging: !gameOver,
             dragActivationDistance: 0,
-            canDragPiece: () => true,
+            canDragPiece: () => !gameOver,
             arrows: arrow,
+            boardOrientation: orientation,
           }} />
         </div>
 
         <div style={styles.sidebar}>
+
+          {gameOver && (
+            <div style={styles.gameOverCard}>
+              <span style={styles.gameOverIcon}>♟</span>
+              <p style={styles.gameOverText}>{gameOver}</p>
+            </div>
+          )}
+
           <div style={styles.card}>
             <p style={styles.cardTitle}>Neural Network Evaluation</p>
             <EvalRow label="White wins" value={prediction.white} color="#f0f0f0" />
             <EvalRow label="Black wins" value={prediction.black} color="#888" />
-            <EvalRow label="Draw"       value={prediction.draw}  color="#aaa" />
+            <EvalRow label="Draw"       value={prediction.draw}  color="#555" />
           </div>
 
           <div style={styles.card}>
@@ -117,15 +170,33 @@ function App() {
             <button
               style={styles.btn}
               onClick={() => fetchBestMove(game.fen())}
-              disabled={loadingMove || game.isGameOver()}
+              disabled={loadingMove || !!gameOver}
             >
               {loadingMove ? 'Thinking...' : 'Find Best Move'}
             </button>
           </div>
 
-          <button style={styles.resetBtn} onClick={reset}>
-            Reset Board
-          </button>
+          <div style={styles.card}>
+            <p style={styles.cardTitle}>Move History</p>
+            <div style={styles.historyBox} ref={historyRef}>
+              {movePairs.length === 0
+                ? <span style={styles.dim}>No moves yet</span>
+                : movePairs.map(([w, b], i) => (
+                  <div key={i} style={styles.moveRow}>
+                    <span style={styles.moveNum}>{i + 1}.</span>
+                    <span style={styles.moveSan}>{w}</span>
+                    <span style={{ ...styles.moveSan, color: b ? '#aaa' : 'transparent' }}>{b ?? '...'}</span>
+                  </div>
+                ))
+              }
+            </div>
+          </div>
+
+          <div style={styles.buttonRow}>
+            <button style={styles.resetBtn} onClick={reset}>Reset</button>
+            <button style={styles.resetBtn} onClick={flipBoard}>Flip</button>
+          </div>
+
         </div>
       </div>
     </div>
@@ -135,11 +206,11 @@ function App() {
 function EvalRow({ label, value, color }) {
   return (
     <div style={styles.evalRow}>
-      <span style={{ color }}>{label}</span>
+      <span style={{ color, minWidth: 72, fontSize: 12 }}>{label}</span>
       <div style={styles.barWrap}>
         <div style={{ ...styles.bar, width: `${value}%`, backgroundColor: color }} />
       </div>
-      <span style={{ color, minWidth: 48, textAlign: 'right' }}>{value.toFixed(1)}%</span>
+      <span style={{ color, minWidth: 44, textAlign: 'right', fontSize: 12 }}>{value.toFixed(1)}%</span>
     </div>
   );
 }
@@ -169,20 +240,32 @@ const styles = {
     flexWrap: 'wrap',
     justifyContent: 'center',
   },
-  boardWrap: {
-    width: 480,
-  },
+  boardWrap: { width: 480 },
   sidebar: {
     display: 'flex',
     flexDirection: 'column',
-    gap: 16,
+    gap: 12,
     width: 220,
+  },
+  gameOverCard: {
+    background: '#2a1f0e',
+    border: '1px solid #ff8c00',
+    borderRadius: 8,
+    padding: '14px 18px',
+    textAlign: 'center',
+  },
+  gameOverIcon: { fontSize: 24 },
+  gameOverText: {
+    margin: '6px 0 0',
+    fontWeight: 700,
+    color: '#ff8c00',
+    fontSize: 14,
   },
   card: {
     background: '#242424',
     border: '1px solid #333',
     borderRadius: 8,
-    padding: '16px 18px',
+    padding: '14px 16px',
   },
   cardTitle: {
     fontSize: 11,
@@ -190,7 +273,7 @@ const styles = {
     letterSpacing: '0.1em',
     textTransform: 'uppercase',
     color: '#888',
-    margin: '0 0 12px',
+    margin: '0 0 10px',
   },
   dim: {
     color: '#555',
@@ -203,8 +286,7 @@ const styles = {
     display: 'flex',
     alignItems: 'center',
     gap: 8,
-    fontSize: 13,
-    marginBottom: 8,
+    marginBottom: 7,
   },
   barWrap: {
     flex: 1,
@@ -219,13 +301,13 @@ const styles = {
     transition: 'width 0.4s ease',
   },
   moveBox: {
-    height: 40,
+    height: 38,
     display: 'flex',
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: 10,
   },
   moveText: {
-    fontSize: 26,
+    fontSize: 24,
     fontWeight: 700,
     fontFamily: 'monospace',
     color: '#ff8c00',
@@ -241,11 +323,34 @@ const styles = {
     fontWeight: 700,
     fontSize: 13,
     cursor: 'pointer',
-    opacity: 1,
-    transition: 'opacity 0.2s',
+  },
+  historyBox: {
+    maxHeight: 160,
+    overflowY: 'auto',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 2,
+  },
+  moveRow: {
+    display: 'flex',
+    gap: 8,
+    fontSize: 13,
+    fontFamily: 'monospace',
+  },
+  moveNum: {
+    color: '#555',
+    minWidth: 22,
+  },
+  moveSan: {
+    color: '#e0e0e0',
+    minWidth: 48,
+  },
+  buttonRow: {
+    display: 'flex',
+    gap: 8,
   },
   resetBtn: {
-    width: '100%',
+    flex: 1,
     padding: '8px 0',
     background: 'transparent',
     color: '#555',
